@@ -633,6 +633,13 @@ fetch_all = function()
   return hosts
 end
 
+-- only this machine's daemon: instant, unlike `fetch_all` (which waits for hosts that do not answer)
+local function fetch_local()
+  local ok, out = wezterm.run_child_process { pult_bin, 'ls', '--json' }
+  local okj, list = pcall(wezterm.json_parse, ok and out or '[]')
+  return { { ['local'] = true, sessions = okj and type(list) == 'table' and list or {} } }
+end
+
 -- where a session lives: (host name in the pult config, hostname, id) → target of the pult commands (`devbox:3` / `3`)
 local function spec_of(h, s) return h['local'] and tostring(s.id) or (h.name .. ':' .. s.id) end
 
@@ -926,13 +933,8 @@ end
 local function claude_here(window, pane)
   local s
   if pane_session(pane) then
-    if pane_host(pane) == my_host then
-      local ok, out = wezterm.run_child_process { pult_bin, 'ls', '--json' }
-      local okj, list = pcall(wezterm.json_parse, ok and out or '[]')
-      _, s = find_pane_session({ { ['local'] = true, sessions = okj and list or {} } }, pane)
-    else
-      _, s = find_pane_session(fetch_all(), pane)
-    end
+    local _
+    _, s = find_pane_session(pane_host(pane) == my_host and fetch_local() or fetch_all(), pane)
   end
   if s and s.busy == false then return pane:send_text('claude\r') end
   new_tab(window, pane, 'claude')
@@ -945,7 +947,7 @@ local function close_tab(window, pane)
     window:perform_action(act.CloseCurrentTab { confirm = true }, pane)
     return
   end
-  local hosts = fetch_all()
+  local hosts = pane_host(pane) == my_host and fetch_local() or fetch_all()
   local h, s = find_pane_session(hosts, pane)
   -- an empty shell has nothing worth keeping: close without asking (the session ends)
   if s and s.busy == false then
