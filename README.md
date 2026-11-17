@@ -23,8 +23,6 @@ floating pickers, notifications with buttons).
 
 ![The session picker, over two machines](docs/images/picker.png)
 
-*The sessions in these screenshots are made-up demo data.*
-
 ## Status
 
 Used daily on Linux. The macOS code paths exist but are less tested. Windows is not supported. The wire protocol and
@@ -59,6 +57,8 @@ Skip parts with `--no-wezterm`, `--no-hooks`, `--no-service`. Remove everything 
 ## Use
 
 Open WezTerm: every tab is now a persistent session. Closing a tab detaches; the session lives on.
+
+You do not need to remember the keys: **`F1` lists all of them**, searchable, and `Enter` runs the entry.
 
 | Key | What it does |
 |-----|--------------|
@@ -119,6 +119,61 @@ mkdir -p ~/.local/state/pult
 printf '%s' "$input" | jq -c '{rate_limits}' > ~/.local/state/pult/usage.json.tmp \
   && mv ~/.local/state/pult/usage.json.tmp ~/.local/state/pult/usage.json
 ```
+
+## The idea
+
+Claude Code runs for minutes at a time, and you end up with several sessions on your laptop, on a dev server, in a
+build box. The goal of pult is to make that manageable: one place that shows **which session needs you**, sessions that
+**survive** a closed terminal or a dropped connection, and **the same view from any machine**.
+
+It is inspired by tmux and screen, whose persistent, reattachable sessions solve the survival part. pult keeps that idea and
+changes the rest:
+
+| | tmux | pult |
+|---|---|---|
+| Sessions survive closing the terminal and dropped SSH | yes | yes |
+| Several clients can attach to one session | yes | yes |
+| Windows, panes, prefix keys, copy mode | its own | none: the terminal's tabs, splits, scrollback and selection are used |
+| Knows what the program inside is doing | no | yes: Claude Code hooks give every session a status |
+| Tells you when a session needs you | no | tab colours, notifications, a jump key |
+| Lists sessions across machines | no | yes, one picker for all of them |
+| Configuration | a language of its own | a hosts file and a few keys |
+
+pult is not a replacement for tmux in general. It does one job: shells and Claude Code sessions, kept alive and watched.
+
+## How the machines connect
+
+There is **no server, no central daemon and no open port**. Every machine runs its own `pultd`, which only listens on a local
+unix socket and owns the sessions on that machine. Machines are tied together by the SSH you already have:
+
+```text
+  laptop                                        devbox
+ ┌───────────────────────┐                     ┌───────────────────────┐
+ │ terminal tab          │                     │                       │
+ │   pult attach devbox:3│──── ssh -t devbox ─▶│ pult attach 3         │
+ │                       │   (plain terminal   │   │ unix socket       │
+ │ pult ls --all         │    stream)          │   ▼                   │
+ │   merges both lists   │◀── ssh devbox ──────│ pultd: session 3 ─ claude
+ │ pultd: session 1, 2   │   pult ls --json    │ pultd: session 1, 2   │
+ └───────────────────────┘                     └───────────────────────┘
+```
+
+- **`~/.config/pult/hosts`** lists the other machines: a name and an SSH target (an alias from `~/.ssh/config` is fine).
+  Nothing else is needed, no pairing and no keys of its own: it uses yours, with `BatchMode` (never prompts for a
+  password) and a shared connection that stays open for 10 minutes, so repeated calls are fast.
+- **`pult ls --all`** runs `pult ls --json` on every host over SSH, in parallel, with a ~2 second limit, and merges the
+  answers with the local list. A host that does not answer is shown as unreachable.
+- **`pult attach devbox:3`** replaces itself with `ssh -t devbox pult attach 3`. The `pult` on devbox connects to devbox's
+  own socket, so what travels is an ordinary SSH terminal stream. The session itself lives in devbox's `pultd`: if the
+  connection drops, nothing is lost, and you reattach later from this laptop, another machine or a phone's SSH app.
+- **`pult new --host devbox`** is the same: devbox creates the session.
+- **The status** is computed where Claude runs. The hook on devbox writes it into the session's terminal output, so it
+  travels to you with everything else, and `pultd` replays the current status when you attach. Your terminal colours the
+  tab the same way as for a local session.
+- **Image paste** (`Ctrl+V`) uploads the clipboard image over the same SSH connection into `~/.cache/pult/paste` on the host.
+
+Every machine therefore needs `pult` installed (`~/.cargo/bin/pult`) and the Claude Code hooks, and you need to be able to
+`ssh` to it without a password prompt. There is nothing to run on a machine you only attach *from*, except `pult` itself.
 
 ## How it works
 
