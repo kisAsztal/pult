@@ -545,6 +545,7 @@ fn foreground_pid(s: &Session) -> Option<u32> {
 
 fn list() -> Value {
     let host = hostname();
+    let home = std::env::var("HOME").unwrap_or_default();
     let states = claude_states();
     let rows: Vec<Value> = sessions()
         .iter()
@@ -568,6 +569,7 @@ fn list() -> Value {
                 "pid": s.pid,
                 "busy": busy(s),
                 "host": host,
+                "home": home,
                 "cmd": fg,
                 "title": inner.parser.callbacks().title,
                 "status": field("status"),

@@ -212,7 +212,11 @@ local function basename(cwd)
   return p:match('([^/]+)$') or p
 end
 
-local function tilde(path)
+-- shorten the home directory to ~; `home` is the host's own (when known), else the usual /home/<user> and /Users/<user>
+local function tilde(path, home)
+  if home and home ~= '' and (path == home or path:sub(1, #home + 1) == home .. '/') then
+    return '~' .. path:sub(#home + 1)
+  end
   return (path:gsub('^/home/[^/]+', '~'):gsub('^/Users/[^/]+', '~'))
 end
 
@@ -783,7 +787,7 @@ local function session_rows(hosts)
       table.insert(items, { Text = '  ' .. label .. ' ' .. age(s.since) })
     end
     table.insert(items, { Foreground = { Color = dim } })
-    table.insert(items, { Text = '  ' .. tilde(s.cwd or '') .. ((s.clients or 0) > 0 and '  · open' or '') .. '  #' .. s.id })
+    table.insert(items, { Text = '  ' .. tilde(s.cwd or '', s.home) .. ((s.clients or 0) > 0 and '  · open' or '') .. '  #' .. s.id })
     local hostname = (type(s.host) == 'string' and s.host) or my_host
     table.insert(choices, { id = 'a|' .. spec_of(h, s) .. '|' .. hostname .. '|' .. s.id, label = wezterm.format(items) })
   end
@@ -805,8 +809,10 @@ local function new_session_flow(window, pane, host_name, is_local)
     return
   end
   local choices = {}
+  local home  -- `pult dirs` lists the host's home first
   for d in out:gmatch('[^\n]+') do
-    table.insert(choices, { id = d, label = tilde(d) })
+    home = home or d
+    table.insert(choices, { id = d, label = tilde(d, home) })
   end
   window:perform_action(act.InputSelector {
     title = 'New session: ' .. host_name .. ', directory',

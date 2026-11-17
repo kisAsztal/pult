@@ -98,9 +98,11 @@ fn print_sessions(sessions: &[Value], host: Option<&str>) {
             crate::fmt_age(t.saturating_sub(s["since"].as_u64().unwrap_or(t)))
         };
         let clients = s["clients"].as_u64().unwrap_or(0);
+        // the session's own home (sent by its daemon) is the reliable one; guess only for older daemons
+        let session_home = s["home"].as_str().filter(|h| !h.is_empty());
         let cwd = tilde(
             s["cwd"].as_str().unwrap_or("?"),
-            host.is_none().then_some(home.as_str()),
+            session_home.or(host.is_none().then_some(home.as_str())),
         );
         let cmd = s["cmd"].as_str();
         // the shell's own title says nothing new, nor does a title that is just the command
@@ -521,6 +523,7 @@ mod tests {
     fn tilde_paths() {
         assert_eq!(tilde("/home/me/src/app", Some("/home/me")), "~/src/app");
         assert_eq!(tilde("/home/me", Some("/home/me")), "~");
+        assert_eq!(tilde("/srv/users/me/app", Some("/srv/users/me")), "~/app");
         assert_eq!(tilde("/home/meow/x", Some("/home/me")), "/home/meow/x");
         assert_eq!(tilde("/home/other/src/app", None), "~/src/app");
         assert_eq!(tilde("/Users/other", None), "~");
