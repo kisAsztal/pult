@@ -19,6 +19,12 @@ The terminal side is a [WezTerm](https://wezterm.org) config. It works with stoc
 with [pult-term](https://github.com/kisAsztal/pult-term), a small WezTerm fork (native tab animation,
 floating pickers, notifications with buttons).
 
+![Tabs coloured by status, a permission request waiting](docs/images/waiting.png)
+
+![The session picker, over two machines](docs/images/picker.png)
+
+*The sessions in these screenshots are made-up demo data.*
+
 ## Status
 
 Used daily on Linux. The macOS code paths exist but are less tested. Windows is not supported. The wire protocol and
