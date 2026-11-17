@@ -239,14 +239,17 @@ fn sessions_can_be_found_by_name() {
 #[test]
 fn an_idle_shell_session_ends_when_the_last_client_leaves() {
     let d = Daemon::start("idle-shell");
-    let (mut s, reply) = d.open(json!({
+    let (s, reply) = d.open(json!({
         "cmd": "new", "cols": 80, "rows": 24, "cwd": "/",
         "env": { "PATH": std::env::var("PATH").unwrap(), "SHELL": "/bin/sh" },
     }));
     assert_eq!(reply["ok"], true);
-    // wait for the shell to come up, then detach with nothing running in it
-    s.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
-    let _ = read_frame(&mut s);
+    // wait until the shell is up and idle (on a loaded machine it can take a while), then detach
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while d.sessions().first().is_none_or(|x| x["busy"] != false) {
+        assert!(Instant::now() < deadline, "the shell never became idle");
+        std::thread::sleep(Duration::from_millis(50));
+    }
     drop(s);
     let deadline = Instant::now() + Duration::from_secs(5);
     while !d.sessions().is_empty() {
