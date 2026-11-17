@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["pult"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/kisAsztal/pult"
+rust-version = "1.88"
+
+[profile.release]
+strip = true
+lto = "thin"

@@ -1,0 +1,10 @@
+[Unit]
+Description=pultd: persistent terminal sessions for Claude Code
+
+[Service]
+ExecStart=%h/.cargo/bin/pult daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
