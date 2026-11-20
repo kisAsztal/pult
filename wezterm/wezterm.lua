@@ -24,8 +24,11 @@ local opts = (function()
   local ok, t = pcall(dofile, wezterm.home_dir .. '/.config/pult/wezterm.lua')
   return (ok and type(t) == 'table') and t or {}
 end)()
-local font_size = opts.font_size or 11.5
+local is_mac = wezterm.target_triple:find('darwin') ~= nil
+local font_size = opts.font_size or (is_mac and 17 or 11.5)
 local host_alias = opts.host_alias or {}
+-- name of a host in titles and lists; macOS host names end in .local
+local function host_label(h) return host_alias[h] or (h:gsub('%.local$', '')) end
 
 -- Colours follow the system light / dark setting and are re-read when it changes. Test: PULT_APPEARANCE=Light|Dark.
 -- The config is evaluated in several places (GUI, mux) and wezterm.gui is not available in all of them, so on
@@ -132,6 +135,15 @@ config.colors = {
 if opts.font then
   config.font = wezterm.font_with_fallback { opts.font, 'Symbols Nerd Font Mono' }
 end
+-- dim and bold text in fixed weights: WezTerm would take the lightest and the heaviest installed one (Thin, ExtraBold)
+local function weight_rule(intensity, italic, weight)
+  local face = { family = opts.font or 'JetBrains Mono', weight = weight, italic = italic }
+  return { intensity = intensity, italic = italic, font = wezterm.font_with_fallback { face, 'Symbols Nerd Font Mono' } }
+end
+config.font_rules = {
+  weight_rule('Half', false, 'Regular'), weight_rule('Half', true, 'Regular'),
+  weight_rule('Bold', false, 'Bold'), weight_rule('Bold', true, 'Bold'),
+}
 config.font_size = font_size
 config.line_height = 1.1
 
@@ -142,7 +154,7 @@ local frame_base = {
   -- every tab bar repaint (~10 ms per frame, ~10% CPU while the spinner runs)
   font = wezterm.font_with_fallback {
     opts.font or 'JetBrains Mono',
-    wezterm.target_triple:find('darwin') and 'Apple Braille' or 'DejaVu Sans',
+    is_mac and 'Apple Braille' or 'DejaVu Sans',
   },
   -- the same size as the terminal font: the fancy tab bar measures tabs and the right-hand status in terminal
   -- cells, and a larger font truncates the labels
@@ -180,6 +192,11 @@ config.window_decorations = 'INTEGRATED_BUTTONS|RESIZE'
 config.integrated_title_button_style = 'Gnome'
 config.integrated_title_buttons = { 'Hide', 'Maximize', 'Close' }
 config.integrated_title_button_color = c.sub
+if is_mac then
+  -- the system's own buttons on the left; the green one opens a full screen Space
+  config.integrated_title_button_style = 'MacOsNative'
+  config.native_macos_fullscreen_mode = true
+end
 
 -- pultd: every new tab is a persistent session; closing the tab only detaches --------------------------------
 local pult_bin = wezterm.home_dir .. '/.cargo/bin/pult'
@@ -311,7 +328,7 @@ wezterm.on('format-tab-title', function(tab, tabs, panes, cfg, hover, max_width)
 
   -- host name: always for remote tabs, for local ones only if it fits
   local function build1(with_host, k)
-    local name = (with_host and ph and ph ~= '') and ((host_alias[ph] or ph) .. ':' .. dir) or dir
+    local name = (with_host and ph and ph ~= '') and (host_label(ph) .. ':' .. dir) or dir
     local items = {
       { Background = { Color = k.bg } },
       { Foreground = { Color = k.stripe } }, { Text = '▎' },
@@ -359,7 +376,6 @@ end)
 -- Right-hand status and ambient frame while something waits ---------------------------------------------
 local save_order  -- defined below (tab order), called from update-status
 local session_picker  -- defined below, opened by update-status after a startup with restore = 'picker'
-local window_born = {}  -- window id → time of the first status update (the key hint shows in new windows)
 
 -- Claude Code plan usage: ~/.claude/statusline.sh writes the rate_limits of the statusline JSON here
 -- (see the README), and this config reads it every 10 s.
@@ -428,7 +444,7 @@ local function pane_label(p)
   local uv = p:get_user_vars()
   local dir = basename(p:get_current_working_dir()) or p:get_title()
   local h = uv.pult_host
-  if h and h ~= '' then return (host_alias[h] or h) .. ':' .. dir end
+  if h and h ~= '' then return host_label(h) .. ':' .. dir end
   return dir
 end
 
@@ -527,10 +543,8 @@ wezterm.on('update-status', function(window, pane)
   local narrow = cols < 120
 
   local items = {}
-  local wid = window:window_id()
-  window_born[wid] = window_born[wid] or os.time()
-  -- only with few tabs, otherwise WezTerm would cut it off (a new window has one tab anyway)
-  if os.time() - window_born[wid] < 20 and #window:mux_window():tabs() <= 3 then
+  -- the key hint, while the tabs leave room for it (WezTerm would cut the status off otherwise)
+  if #window:mux_window():tabs() <= math.floor(cols / 40) then
     table.insert(items, { Foreground = { Color = c.magenta } })
     table.insert(items, { Attribute = { Intensity = 'Bold' } })
     table.insert(items, { Text = 'F1' })
@@ -583,7 +597,11 @@ wezterm.on('update-status', function(window, pane)
   if bg_ready then
     local want_bg = bg_file(bg_index(window:active_pane()))
     local cur_bg = overrides.background and overrides.background[1].source.File
-    if cur_bg ~= want_bg then
+    local native = pcall(function() return window.pult_background end)
+    if native and #window:effective_config().background > 0 then
+      -- pult-term swaps the image itself, without a config reload
+      window:pult_background(want_bg)
+    elseif cur_bg ~= want_bg then
       overrides.background = bg_layers(bg_index(window:active_pane()))
       changed = true
     end
@@ -815,7 +833,7 @@ local function host_name_for(hosts, hostname)
       if s.host == hostname then return h.name end
     end
   end
-  return host_alias[hostname] or hostname
+  return host_label(hostname)
 end
 
 local status_order = { waiting = 1, error = 2, done = 3, working = 4, idle = 5 }
@@ -1125,6 +1143,8 @@ local function help_picker(window, pane)
   }
   local choices = {}
   for i, it in ipairs(items) do
+    -- macOS: the Cmd form of the keys that have one
+    if is_mac then it[1] = it[1]:gsub('Ctrl%+Shift%+(%u)$', 'Cmd+%1'):gsub('^Alt%+1', 'Cmd+1') end
     table.insert(choices, {
       id = tostring(i),
       -- the selected row is drawn with inverted colours, where a coloured key name is unreadable: plain colour +
@@ -1162,6 +1182,13 @@ config.keys = {
   { key = '?', mods = 'CTRL|SHIFT', action = wezterm.action_callback(help_picker) },
   { key = 'v', mods = 'CTRL', action = wezterm.action_callback(paste_image) },
 }
+-- macOS: Cmd does what Ctrl+Shift does
+if is_mac then
+  for i = 1, #config.keys do
+    local k = config.keys[i]
+    if k.mods == 'CTRL|SHIFT' then table.insert(config.keys, { key = k.key, mods = 'CMD', action = k.action }) end
+  end
+end
 -- Mouse: selecting copies (to the clipboard too, not only the middle-click primary selection); with Shift when the
 -- program grabs the mouse. Ctrl+Shift+drag moves the window anywhere.
 config.mouse_bindings = {
