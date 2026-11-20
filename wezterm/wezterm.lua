@@ -92,12 +92,14 @@ if bg_ready then
   config.background = bg_layers(1)
 elseif use_bg and wezterm.gui then
   -- bg.py sits next to this file (the config is a symlink into the repo); the mkdir lock keeps several
-  -- evaluations of the config from starting it more than once
+  -- evaluations of the config from starting it more than once, and a lock older than 10 minutes is left over
+  -- from an interrupted run. When the last image is there, update-status reloads the config.
   local ok, _, real = pcall(wezterm.run_child_process, { 'readlink', '-f', wezterm.config_file })
   local script = ok and real and real:gsub('%s+$', ''):gsub('[^/]+$', 'bg.py')
   if script and exists(script) then
     wezterm.background_child_process { 'sh', '-c',
-      'mkdir -p "$1" && mkdir "$1/.lock" 2>/dev/null || exit 0; PULT_BG_FONT="$2" python3 "$3" "$1" "$4" ' .. bg_count
+      'mkdir -p "$1" && find "$1" -maxdepth 1 -name .lock -mmin +10 -exec rmdir {} \\; ;'
+        .. ' mkdir "$1/.lock" 2>/dev/null || exit 0; PULT_BG_FONT="$2" python3 "$3" "$1" "$4" ' .. bg_count
         .. ' "$5" "$6" "$7" "$8" "$9" "${10}" "${11}" "${12}"; rmdir "$1/.lock"',
       'bg', bg_dir, opts.bg_font or '', script, bg_prefix,
       c.mantle, c.magenta, c.blue, c.blue, c.yellow, c.orange, c.green, c.red }
@@ -526,6 +528,11 @@ end)
 wezterm.on('update-status', function(window, pane)
   save_order()
   refresh_hosts()
+  -- the background images were still being made when the config was read: show them now
+  if use_bg and not bg_ready and exists(bg_file(bg_count)) then
+    bg_ready = true
+    wezterm.reload_configuration()
+  end
   -- gui-startup has no GUI window yet: the startup picker opens on the first status update
   if wezterm.GLOBAL.pult_startup_picker then
     wezterm.GLOBAL.pult_startup_picker = nil

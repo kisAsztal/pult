@@ -82,6 +82,12 @@ if [ "$do_wezterm" = 1 ]; then
       mv "$WEZ_CONFIG" "$WEZ_CONFIG.bak-$(date +%Y%m%d%H%M%S)"
     fi
     ln -sfn "$ROOT/wezterm/wezterm.lua" "$WEZ_CONFIG"
+    # the tab backgrounds are drawn by wezterm/bg.py; without Pillow the background stays plain
+    if ! python3 -c 'import PIL' 2>/dev/null; then
+      echo "   no python3 Pillow: the tab backgrounds stay plain. Install it, then restart WezTerm:"
+      if [ "$(uname)" = Darwin ]; then echo "     python3 -m pip install --user Pillow"
+      else echo "     sudo apt install python3-pil   (or your distribution's Pillow package)"; fi
+    fi
   else
     echo "== no WezTerm found, skipping the config"
   fi
