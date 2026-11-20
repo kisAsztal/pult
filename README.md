@@ -64,7 +64,7 @@ You do not need to remember the keys: **`F1` lists all of them**, searchable, an
 
 | Key | What it does |
 |-----|--------------|
-| `F2` / `Ctrl+Shift+O` | Pick a session from every host: open it, start a new one, or stop one |
+| `F2` / `Ctrl+Shift+O` | Pick a session from every host: open it, start a new one, stop one or all (in pult-term `Ctrl+D` stops the selected one and the list stays open) |
 | `F3` / `Ctrl+Shift+I` | Jump to the next tab where Claude waits for you |
 | `F4` | Run `claude` in this tab (if the shell is empty), otherwise in a new tab |
 | `F5` | New session: host → directory → `claude` or shell |

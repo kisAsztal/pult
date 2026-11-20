@@ -417,6 +417,7 @@ local notify_ok          -- does window:pult_notify exist? (nil: not checked yet
 local notif_key = {}     -- pane id → last seen state key
 local notif_shown = {}   -- pane id → key of the notification on screen
 local fetch_all, find_pane_session  -- defined below (approval checks the daemon)
+local fetch_quick, refresh_hosts    -- defined below (cached host list for the pickers)
 local notif_ask = {}     -- pane id → the approvable request (since, ask), verified on click
 local notif_text = {
   waiting = 'needs permission',
@@ -507,6 +508,7 @@ end)
 
 wezterm.on('update-status', function(window, pane)
   save_order()
+  refresh_hosts()
   -- gui-startup has no GUI window yet: the startup picker opens on the first status update
   if wezterm.GLOBAL.pult_startup_picker then
     wezterm.GLOBAL.pult_startup_picker = nil
@@ -650,6 +652,66 @@ end
 -- where a session lives: (host name in the pult config, hostname, id) → target of the pult commands (`devbox:3` / `3`)
 local function spec_of(h, s) return h['local'] and tostring(s.id) or (h.name .. ':' .. s.id) end
 
+-- The pickers must open at once, but `fetch_all` waits for every host (~2 s for one that is down). So `pult ls --all`
+-- runs in the background every few seconds (from update-status) into a cache file; the pickers read that, with this
+-- machine's sessions fresh from `fetch_local`, minus the sessions stopped in the last seconds.
+local hosts_cache = wezterm.home_dir .. '/.cache/pult/ls-all.json'
+
+refresh_hosts = function(now)
+  local g = wezterm.GLOBAL
+  if not has_pult or (not now and g.pult_ls_at and os.time() - g.pult_ls_at < 5) then return end
+  g.pult_ls_at = os.time()
+  wezterm.background_child_process { 'sh', '-c',
+    'mkdir -p "${1%/*}" && { printf \'{"at":%s,"hosts":\' "$(date +%s)"; "$0" ls --all --json; printf "}"; } > "$1.tmp"'
+      .. ' && mv "$1.tmp" "$1"', pult_bin, hosts_cache }
+end
+
+-- a session stopped from a picker: hidden from the cached lists until the cache has caught up
+local function mark_stopped(spec)
+  local t = wezterm.GLOBAL.pult_stopped or {}
+  t[spec] = os.time()
+  wezterm.GLOBAL.pult_stopped = t
+end
+
+local function stop_session(spec)
+  mark_stopped(spec)
+  wezterm.background_child_process { pult_bin, 'kill', spec }
+  refresh_hosts(true)
+end
+
+fetch_quick = function()
+  local f = io.open(hosts_cache, 'r')
+  local hosts
+  if f then
+    local ok, v = pcall(wezterm.json_parse, f:read('*a'))
+    f:close()
+    -- older than a minute (e.g. at startup): not worth showing
+    if ok and type(v) == 'table' and type(v.hosts) == 'table' and os.time() - (tonumber(v.at) or 0) < 60 then
+      hosts = v.hosts
+    end
+  end
+  if not hosts then
+    hosts = fetch_all()
+    refresh_hosts(true)
+  else
+    refresh_hosts()
+    local here = fetch_local()[1].sessions
+    for _, h in ipairs(hosts) do
+      if h['local'] then h.sessions = here end
+    end
+  end
+  local stopped, now = wezterm.GLOBAL.pult_stopped or {}, os.time()
+  for _, h in ipairs(hosts) do
+    local keep = {}
+    for _, s in ipairs(h.sessions or {}) do
+      local at = stopped[spec_of(h, s)]
+      if not (at and now - at < 15) then table.insert(keep, s) end
+    end
+    h.sessions = keep
+  end
+  return hosts
+end
+
 -- Tab order and restore at startup --------------------------------------------------------------------
 -- Closing the window only detaches: the sessions keep running in pultd. At startup (opts.restore):
 --   'picker' (default): one new session, and the session picker if any session is open nowhere
@@ -699,7 +761,7 @@ local function restore_specs()
   local pos = {}
   for i, k in ipairs(read_order()) do pos[k] = i end
   local list = {}
-  for _, h in ipairs(fetch_all()) do
+  for _, h in ipairs(fetch_quick()) do
     for _, s in ipairs(h.sessions or {}) do
       if (s.clients or 0) == 0 then
         local hostname = (type(s.host) == 'string' and s.host) or my_host
@@ -810,7 +872,7 @@ local function session_rows(hosts)
     table.insert(items, { Foreground = { Color = dim } })
     table.insert(items, { Text = '  ' .. tilde(s.cwd or '', s.home) .. ((s.clients or 0) > 0 and '  · open' or '') .. '  #' .. s.id })
     local hostname = (type(s.host) == 'string' and s.host) or my_host
-    table.insert(choices, { id = 'a|' .. spec_of(h, s) .. '|' .. hostname .. '|' .. s.id, label = wezterm.format(items) })
+    table.insert(choices, { id = 'rm:a|' .. spec_of(h, s) .. '|' .. hostname .. '|' .. s.id, label = wezterm.format(items) })
   end
   for _, h in ipairs(hosts) do
     if not h.ok then
@@ -861,7 +923,7 @@ end
 
 -- F5: pick the host for a new session
 local function new_on_host(window, pane)
-  local hosts = fetch_all()
+  local hosts = fetch_quick()
   local choices = {}
   for _, h in ipairs(hosts) do
     table.insert(choices, {
@@ -880,42 +942,84 @@ local function new_on_host(window, pane)
   }, pane)
 end
 
+-- a session row of `session_rows`: 'rm:a|<spec>|<hostname>|<session id>'; `remove:` in front: Ctrl+D in pult-term
+local function parse_row(id)
+  local removed = id:sub(1, 7) == 'remove:'
+  if removed then id = id:sub(8) end
+  local spec, hostname, sid = id:match('^rm:a|([^|]+)|([^|]+)|(.+)$')
+  return spec, hostname, sid, removed
+end
+
 -- picker for stopping a session (from the bottom of the Ctrl+Shift+O list)
 local function kill_picker(window, pane)
-  local choices = session_rows(fetch_all())
+  local choices = session_rows(fetch_quick())
   window:perform_action(act.InputSelector {
     title = 'Stop a session (whatever runs in it exits)',
     fuzzy_description = 'stop: ',
     choices = choices,
     action = wezterm.action_callback(function(w, p, id)
-      local spec = id and id:match('^a|([^|]+)|')
-      if spec then wezterm.run_child_process { pult_bin, 'kill', spec } end
+      local spec = id and parse_row(id)
+      if spec then stop_session(spec) end
+    end),
+  }, pane)
+end
+
+-- stop every session on every reachable host, or only those not open in any window; asks first
+local function stop_all_picker(window, pane)
+  local all, detached = {}, {}
+  for _, h in ipairs(fetch_quick()) do
+    for _, s in ipairs(h.sessions or {}) do
+      table.insert(all, spec_of(h, s))
+      if (s.clients or 0) == 0 then table.insert(detached, spec_of(h, s)) end
+    end
+  end
+  if #all == 0 then return end
+  local function n(k) return k .. (k == 1 and ' session' or ' sessions') end
+  local choices = { { id = 'cancel', label = 'Cancel' } }
+  if #detached > 0 and #detached < #all then
+    table.insert(choices, { id = 'detached', label = colored(c.red, 'Stop the ' .. n(#detached) .. ' not open in any window') })
+  end
+  table.insert(choices, { id = 'all', label = colored(c.red, 'Stop all ' .. n(#all) .. ' on every host, open tabs included') })
+  window:perform_action(act.InputSelector {
+    title = 'Stop all sessions (whatever runs in them exits)',
+    choices = choices,
+    action = wezterm.action_callback(function(w, p, id)
+      local list = (id == 'all' and all) or (id == 'detached' and detached) or {}
+      for _, spec in ipairs(list) do stop_session(spec) end
     end),
   }, pane)
 end
 
 -- Ctrl+Shift+O / F2: sessions on every host, those waiting for you first; one already open in this window is
--- activated instead of opened again
+-- activated instead of opened again. In pult-term Ctrl+D / Delete stops the selected session and the list stays open.
 session_picker = function(window, pane)
-  local hosts = fetch_all()
+  local hosts = fetch_quick()
   local choices = session_rows(hosts)
+  local any = false
+  for _, ch in ipairs(choices) do if ch.id:sub(1, 3) == 'rm:' then any = true break end end
   table.insert(choices, { id = 'here', label = colored(c.green, '+  new session here') })
   for _, h in ipairs(hosts) do
     if h.ok then
       table.insert(choices, { id = (h['local'] and 'nL|' or 'nR|') .. h.name, label = colored(c.green, '+  new session: ' .. h.name .. '…') })
     end
   end
-  table.insert(choices, { id = 'kill', label = colored(c.red, '✕  stop a session…') })
+  if any then
+    table.insert(choices, { id = 'kill', label = colored(c.red, '✕  stop a session…') })
+    table.insert(choices, { id = 'killall', label = colored(c.red, '✕  stop all sessions…') })
+  end
   window:perform_action(act.InputSelector {
-    title = 'pult sessions',
+    title = any and 'pult sessions · Ctrl+D: stop' or 'pult sessions',
     fuzzy_description = 'find a session… (host:directory): ',
     choices = choices,
     action = wezterm.action_callback(function(w, p, id)
       if not id or id == 'x' then return end
       if id == 'here' then return w:perform_action(act.SpawnTab 'CurrentPaneDomain', p) end
       if id == 'kill' then return kill_picker(w, p) end
+      if id == 'killall' then return stop_all_picker(w, p) end
       if id:sub(1, 1) == 'n' then return new_session_flow(w, p, id:sub(4), id:sub(2, 2) == 'L') end
-      local spec, hostname, sid = id:match('^a|([^|]+)|([^|]+)|(.+)$')
+      local spec, hostname, sid, removed = parse_row(id)
+      if not spec then return end
+      if removed then return stop_session(spec) end
       for _, t in ipairs(w:mux_window():tabs()) do
         for _, pp in ipairs(t:panes()) do
           if pane_session(pp) == sid and pane_host(pp) == hostname then t:activate() return end
@@ -937,7 +1041,7 @@ local function new_tab(window, pane, run)
     if dir then table.insert(cmd, '--cwd') table.insert(cmd, dir) end
     return window:perform_action(act.SpawnCommandInNewTab { args = cmd }, pane)
   end
-  local cmd = { pult_bin, 'new', '--host', host_name_for(fetch_all(), host) }
+  local cmd = { pult_bin, 'new', '--host', host_name_for(fetch_quick(), host) }
   if dir then table.insert(cmd, '--cwd') table.insert(cmd, dir) end
   if run then table.insert(cmd, '--run') table.insert(cmd, run) end
   window:perform_action(act.SpawnCommandInNewTab { args = cmd }, pane)
