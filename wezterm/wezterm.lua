@@ -376,6 +376,7 @@ end)
 -- Right-hand status and ambient frame while something waits ---------------------------------------------
 local save_order  -- defined below (tab order), called from update-status
 local session_picker  -- defined below, opened by update-status after a startup with restore = 'picker'
+local native_bg = {}  -- window id → background image last set with window:pult_background (pult-term)
 
 -- Claude Code plan usage: ~/.claude/statusline.sh writes the rate_limits of the statusline JSON here
 -- (see the README), and this config reads it every 10 s.
@@ -597,10 +598,16 @@ wezterm.on('update-status', function(window, pane)
   if bg_ready then
     local want_bg = bg_file(bg_index(window:active_pane()))
     local cur_bg = overrides.background and overrides.background[1].source.File
-    local native = pcall(function() return window.pult_background end)
-    if native and #window:effective_config().background > 0 then
-      -- pult-term swaps the image itself, without a config reload
-      window:pult_background(want_bg)
+    local has_fn, fn = pcall(function() return window.pult_background end)
+    local native = has_fn and fn ~= nil
+    if native and cur_bg then
+      -- pult-term swaps the image itself, without a config reload (once the override has set up the layers);
+      -- only on a change, as this runs on every status update
+      local wid = window:window_id()
+      if native_bg[wid] ~= want_bg then
+        native_bg[wid] = want_bg
+        window:pult_background(want_bg)
+      end
     elseif cur_bg ~= want_bg then
       overrides.background = bg_layers(bg_index(window:active_pane()))
       changed = true
