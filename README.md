@@ -56,7 +56,9 @@ Skip parts with `--no-wezterm`, `--no-hooks`, `--no-service`. Remove everything 
 
 ## Use
 
-Open WezTerm: every tab is now a persistent session. Closing a tab detaches; the session lives on.
+Open WezTerm: every tab is now a persistent session. Closing a tab detaches; the session lives on. Closing the
+window detaches all of them: the next start opens one new session and, if any are left running, the session picker,
+so you reopen only the ones you need (`restore = 'all'` below brings every one back as a tab instead).
 
 You do not need to remember the keys: **`F1` lists all of them**, searchable, and `Enter` runs the entry.
 
@@ -99,7 +101,7 @@ self       laptop        # optional: how this machine is named in listings
 **Project directories** for the new-session picker: `~/.config/pult/projects`, one directory per line; their
 sub-directories are offered. Without the file: `~/projects`, `~/src`, `~/code`.
 
-**Look**: `~/.config/pult/wezterm.lua` returns a table, all keys optional:
+**Look and startup**: `~/.config/pult/wezterm.lua` returns a table, all keys optional:
 
 ```lua
 return {
@@ -107,6 +109,7 @@ return {
   font_size = 12,
   host_alias = { devbox = 'dev' },  -- hostname -> shorter name in titles and lists
   backgrounds = false,              -- plain background instead of the generated images
+  restore = 'all',                  -- at startup reopen every detached session (default 'picker': ask)
 }
 ```
 

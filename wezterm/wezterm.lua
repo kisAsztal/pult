@@ -11,7 +11,9 @@
 --     font_size = 12,
 --     host_alias = { devbox = 'dev' },   -- hostname -> name shown in tab titles and lists
 --     backgrounds = false,               -- false: plain background instead of the generated images
---     bg_font = '/path/to/Mono-Bold.ttf' -- font for the word drawn into the generated backgrounds
+--     bg_font = '/path/to/Mono-Bold.ttf', -- font for the word drawn into the generated backgrounds
+--     restore = 'all',                   -- at startup: 'picker' (default) opens one new session and the session
+--                                        -- picker; 'all' opens a tab for every detached session on every host
 --   }
 
 local wezterm = require 'wezterm'
@@ -356,6 +358,7 @@ end)
 
 -- Right-hand status and ambient frame while something waits ---------------------------------------------
 local save_order  -- defined below (tab order), called from update-status
+local session_picker  -- defined below, opened by update-status after a startup with restore = 'picker'
 local window_born = {}  -- window id → time of the first status update (the key hint shows in new windows)
 
 -- Claude Code plan usage: ~/.claude/statusline.sh writes the rate_limits of the statusline JSON here
@@ -504,6 +507,11 @@ end)
 
 wezterm.on('update-status', function(window, pane)
   save_order()
+  -- gui-startup has no GUI window yet: the startup picker opens on the first status update
+  if wezterm.GLOBAL.pult_startup_picker then
+    wezterm.GLOBAL.pult_startup_picker = nil
+    session_picker(window, pane)
+  end
   update_notifications(window)
   local waiting = 0
   for _, t in ipairs(window:mux_window():tabs()) do
@@ -643,8 +651,10 @@ end
 local function spec_of(h, s) return h['local'] and tostring(s.id) or (h.name .. ':' .. s.id) end
 
 -- Tab order and restore at startup --------------------------------------------------------------------
--- The order of the open tabs (host|session id) is saved to ~/.local/state/pult/tabs.json. At startup every live
--- session that is open nowhere (on any host) gets a tab, in that order.
+-- Closing the window only detaches: the sessions keep running in pultd. At startup (opts.restore):
+--   'picker' (default): one new session, and the session picker if any session is open nowhere
+--   'all': every live session that is open nowhere (on any host) gets a tab, in the saved order
+-- The order of the open tabs (host|session id) is saved to ~/.local/state/pult/tabs.json.
 local order_file = wezterm.home_dir .. '/.local/state/pult/tabs.json'
 local order_str = nil
 local order_key = nil
@@ -713,6 +723,11 @@ wezterm.on('gui-startup', function(cmd)
   -- `wezterm start -- command`: run that, restore nothing
   if not has_pult or (cmd and cmd.args) then mux.spawn_window(cmd or {}) return end
   local specs = restore_specs()
+  if opts.restore ~= 'all' then
+    mux.spawn_window(cmd or {})
+    wezterm.GLOBAL.pult_startup_picker = #specs > 0 or nil
+    return
+  end
   if #specs == 0 then mux.spawn_window(cmd or {}) return end
   local first, _, window = mux.spawn_window { args = { pult_bin, 'attach', specs[1] } }
   for i = 2, #specs do window:spawn_tab { args = { pult_bin, 'attach', specs[i] } } end
@@ -881,7 +896,7 @@ end
 
 -- Ctrl+Shift+O / F2: sessions on every host, those waiting for you first; one already open in this window is
 -- activated instead of opened again
-local function session_picker(window, pane)
+session_picker = function(window, pane)
   local hosts = fetch_all()
   local choices = session_rows(hosts)
   table.insert(choices, { id = 'here', label = colored(c.green, '+  new session here') })
