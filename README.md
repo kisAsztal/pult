@@ -10,7 +10,7 @@ connection: the sessions keep running, and you pick them up again from anywhere.
 - **Persistent sessions**: a small daemon (`pultd`) owns the shells. A terminal window is only a view.
 - **Several machines**: list your hosts once, then attach to `devbox:3` over SSH. One picker shows every
   session on every machine, the ones waiting for you first.
-- **Desktop notifications** when a session needs permission or finishes, with an *Allow* button for simple
+- **Desktop notifications** when a session needs permission or fails, with an *Allow* button for simple
   permission requests (needs [pult-term](https://github.com/kisAsztal/pult-term)).
 - **Keeps the machine awake** while a local Claude is working, and lets go when it waits for you.
 - **Paste images into a remote Claude**: `Ctrl+V` uploads the clipboard image and pastes its remote path.

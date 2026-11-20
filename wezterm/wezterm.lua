@@ -407,7 +407,7 @@ local function usage_items(items)
 end
 
 -- Notifications (pult-term only: window:pult_notify) ------------------------------------------------------
--- When a tab needs permission / is done / failed and you are not looking at it: a desktop notification with
+-- When a tab needs permission / failed and you are not looking at it (no notification for "done, your turn"): a desktop notification with
 -- buttons. Only on a status change (old "done" tabs stay quiet at startup); it goes away when you look at the tab
 -- or the status changes.
 local notify_ok          -- does window:pult_notify exist? (nil: not checked yet)
@@ -417,7 +417,6 @@ local fetch_all, find_pane_session  -- defined below (approval checks the daemon
 local notif_ask = {}     -- pane id → the approvable request (since, ask), verified on click
 local notif_text = {
   waiting = 'needs permission',
-  done = 'done, your turn',
   error = 'failed',
 }
 
