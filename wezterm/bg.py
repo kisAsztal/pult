@@ -6,7 +6,7 @@ is enough (the blur hides the pixels anyway).
     bg.py <dir> <prefix> <count> <mantle> <magenta> <blue> <cyan> <yellow> <orange> <green> <red>
 
 Only the missing images are made (<dir>/<prefix>-<i>.png); image i is always the same (seed = i).
-Needs Pillow. The font of the word comes from $PULT_BG_FONT (default: DejaVuSansMono-Bold.ttf).
+Needs Pillow. The font of the word comes from $PULT_BG_FONT (default: DejaVuSansMono-Bold.ttf, on macOS Menlo.ttc).
 """
 import os
 import random
@@ -16,6 +16,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFo
 
 W, H = 480, 300  # the blur hides the resolution; a smaller texture loads faster on tab switch
 SS = 2  # anti-aliasing: draw at double size
+DEFAULT_FONT = 'Menlo.ttc' if sys.platform == 'darwin' else 'DejaVuSansMono-Bold.ttf'
 
 
 def rgb(h):
@@ -78,7 +79,7 @@ def make(path, seed, pal, dark):
         try:
             # the word always lies completely within the right part of the image
             size = int(rnd.uniform(.18, .26) * w)
-            font = ImageFont.truetype(os.environ.get('PULT_BG_FONT', 'DejaVuSansMono-Bold.ttf'), size)
+            font = ImageFont.truetype(os.environ.get('PULT_BG_FONT') or DEFAULT_FONT, size)
             x0, y0, x1, y1 = cd.textbbox((0, 0), 'pult', font=font)
             if x1 > w * .55:
                 font = ImageFont.truetype(font.path, int(size * w * .55 / x1))

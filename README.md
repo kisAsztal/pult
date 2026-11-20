@@ -32,6 +32,8 @@ config formats may still change before 1.0.
 
 - Rust 1.88+ (to build), `jq` (to edit the Claude Code settings)
 - [WezTerm](https://wezterm.org/installation) (or pult-term) for the tab colours and pickers
+- In Claude Code, an ANSI theme (`/theme`: "Dark mode (ANSI colors only)" or the light one): Claude then draws with
+  the terminal's colours, which pult sets and switches with the system light / dark setting
 - For several machines: SSH key login to each one (`BatchMode`, no password prompts) and `pult` installed on each
 - Optional: `wl-paste` (Wayland) or `xclip` (X11) for image paste; `python3` with Pillow for the generated
   tab backgrounds
