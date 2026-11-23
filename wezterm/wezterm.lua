@@ -51,10 +51,12 @@ local c = dark and {
   crust = '#221f22', mantle = '#19181a', bg = '#2d2a2e', surface = '#403e41', surface2 = '#5b595c',
   overlay = '#727072', sub = '#939293', fg = '#fcfcfa',
   red = '#ff6188', orange = '#fc9867', yellow = '#ffd866', green = '#a9dc76', blue = '#78dce8', magenta = '#ab9df2',
+  true_blue = '#6a9fe8',
 } or {
   crust = '#ece6e4', mantle = '#f2ecea', bg = '#faf4f2', surface = '#e6e0de', surface2 = '#d3cdcc',
   overlay = '#918c8e', sub = '#706b6e', fg = '#29242a',
   red = '#e14775', orange = '#e16032', yellow = '#cc7a0a', green = '#269d69', blue = '#1c8ca8', magenta = '#5a3fa8',
+  true_blue = '#3170c9',
 }
 -- tab background: this share of the status colour is mixed into the base colour
 local tab_mix = { active = 0.34, inactive = 0.16 }
@@ -121,8 +123,9 @@ config.colors = {
   scrollbar_thumb = c.surface2,
   split = c.surface2,
   -- in the light theme "black" is the dark text colour, in the dark theme the other way round
-  ansi    = dark and { c.surface, c.red, c.green, c.yellow, c.blue, c.magenta, c.blue, c.fg }
-                 or { c.fg, c.red, c.green, c.yellow, c.blue, c.magenta, c.blue, c.sub },
+  -- blue and cyan differ: Claude Code's ansi themes draw links and selection with them
+  ansi    = dark and { c.surface, c.red, c.green, c.yellow, c.true_blue, c.magenta, c.blue, c.fg }
+                 or { c.fg, c.red, c.green, c.yellow, c.true_blue, c.magenta, c.blue, c.sub },
   brights = dark and { c.overlay, c.red, c.green, c.orange, c.blue, c.magenta, c.blue, c.fg }
                  or { c.overlay, c.red, c.green, c.orange, c.blue, c.magenta, c.blue, c.sub },
   tab_bar = {
@@ -1217,6 +1220,19 @@ for _, mods in ipairs { 'NONE', 'SHIFT' } do
     table.insert(config.mouse_bindings, {
       event = { Up = { streak = streak, button = 'Left' } }, mods = mods,
       action = act.CompleteSelection 'ClipboardAndPrimarySelection',
+    })
+  end
+end
+
+-- macOS: Cmd+click opens a link, also when the program grabs the mouse
+if is_mac then
+  for _, reporting in ipairs { false, true } do
+    table.insert(config.mouse_bindings, {
+      event = { Down = { streak = 1, button = 'Left' } }, mods = 'CMD', mouse_reporting = reporting, action = act.Nop,
+    })
+    table.insert(config.mouse_bindings, {
+      event = { Up = { streak = 1, button = 'Left' } }, mods = 'CMD', mouse_reporting = reporting,
+      action = act.OpenLinkAtMouseCursor,
     })
   end
 end
